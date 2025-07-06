@@ -1,6 +1,7 @@
 package incr
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -14,6 +15,11 @@ import (
 //
 // Create a new identifier with [NewIdentifier].
 type Identifier [16]byte
+
+// IdentifierCompareFunc is a function that can be used to compare identifiers.
+func IdentifierCompareFunc(id0, id1 Identifier) int {
+	return bytes.Compare(id0[:], id1[:])
+}
 
 // IdentifierProvider is a type that can provide identifiers.
 type IdentifierProvider interface {

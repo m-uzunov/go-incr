@@ -292,7 +292,7 @@ func Test_ParallelStabilize_always_cutoff_error(t *testing.T) {
 
 func Test_ParallelStabilize_printsErrors(t *testing.T) {
 	ctx := context.Background()
-	g := New()
+	g := New(OptGraphTracing(true))
 
 	outBuf := new(bytes.Buffer)
 	errBuf := new(bytes.Buffer)
