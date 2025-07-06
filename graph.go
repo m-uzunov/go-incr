@@ -278,6 +278,12 @@ type Graph struct {
 	// reusable identifier slice for sorting
 	keys []Identifier
 
+	// immediateRecomputeMu interlocks access to immediateRecompute.
+	immediateRecomputeMu sync.Mutex
+
+	// immediateRecompute is a reusable list of nodes that need to be recomputed immediately.
+	immediateRecompute []INode
+
 	// onStabilizationStart are optional hooks called when stabilization starts.
 	onStabilizationStart []func(context.Context)
 
