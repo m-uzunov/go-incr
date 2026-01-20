@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +43,7 @@ func New(opts ...GraphOption) *Graph {
 		parallelism:               options.Parallelism,
 		clearRecomputeHeapOnError: options.ClearRecomputeHeapOnError,
 		deterministic:             options.Deterministic,
+		tracing:                   options.Tracing,
 		stabilizationNum:          1,
 		status:                    StatusNotStabilizing,
 		nodes:                     allocateMapWithSize[Identifier, INode](options.PreallocateNodesSize),
@@ -137,6 +137,16 @@ func OptGraphDeterministic(deterministic bool) func(*GraphOptions) {
 	}
 }
 
+// OptGraphTracing enables writing stabilization information to the context passed to [Graph.Stabilize]
+// or [Graph.ParallelStabilize] and extracting tracers from it for writing logs to standard error/standard output.
+//
+// If not provided, by default tracing is disabled.
+func OptGraphTracing(tracing bool) func(*GraphOptions) {
+	return func(g *GraphOptions) {
+		g.Tracing = tracing
+	}
+}
+
 // OptGraphIdentifierProvider sets the graph's identifier provider.
 //
 // By default the graph will use a crypto/rand based identifier provider that returns
@@ -159,6 +169,7 @@ type GraphOptions struct {
 	PreallocateSentinelsSize  int
 	ClearRecomputeHeapOnError bool
 	Deterministic             bool
+	Tracing                   bool
 	IdentifierProvider        IdentifierProvider
 }
 
@@ -196,6 +207,10 @@ type Graph struct {
 	// deterministic controls aspects of stabilization such that
 	// if the user values determinism, things will happen in consistent order.
 	deterministic bool
+
+	// tracing enables propagation of stabilization information to the context passed to [Graph.Stabilize]
+	// and extracting tracers from it for writing stabilization logs.
+	tracing bool
 
 	// nodesMu interlocks access to nodes
 	nodesMu sync.Mutex
@@ -259,6 +274,15 @@ type Graph struct {
 	// metadata is extra data you can add to the graph instance and
 	// manage yourself.
 	metadata any
+
+	// reusable identifier slice for sorting
+	keys []Identifier
+
+	// immediateRecomputeMu interlocks access to immediateRecompute.
+	immediateRecomputeMu sync.Mutex
+
+	// immediateRecompute is a reusable list of nodes that need to be recomputed immediately.
+	immediateRecompute []INode
 
 	// onStabilizationStart are optional hooks called when stabilization starts.
 	onStabilizationStart []func(context.Context)
@@ -670,7 +694,9 @@ func (graph *Graph) unwatchNode(sn ISentinel, input INode) {
 
 func (graph *Graph) ensureNotStabilizing(ctx context.Context) error {
 	if atomic.LoadInt32(&graph.status) != StatusNotStabilizing {
-		TracePrintf(ctx, "stabilize; already stabilizing, cannot continue")
+		if graph.tracing {
+			TracePrintf(ctx, "stabilize; already stabilizing, cannot continue")
+		}
 		return ErrAlreadyStabilizing
 	}
 	return nil
@@ -682,8 +708,10 @@ func (graph *Graph) stabilizeStart(ctx context.Context) context.Context {
 		handler(ctx)
 	}
 	graph.stabilizationStarted = time.Now()
-	ctx = WithStabilizationNumber(ctx, graph.stabilizationNum)
-	TracePrintln(ctx, "stabilization starting")
+	if graph.tracing {
+		ctx = WithStabilizationNumber(ctx, graph.stabilizationNum)
+		TracePrintln(ctx, "stabilization starting")
+	}
 	return ctx
 }
 
@@ -695,11 +723,13 @@ func (graph *Graph) stabilizeEnd(ctx context.Context, err error) {
 	for _, handler := range graph.onStabilizationEnd {
 		handler(ctx, graph.stabilizationStarted, err)
 	}
-	if err != nil {
-		TraceErrorf(ctx, "stabilization error: %v", err)
-		TracePrintf(ctx, "stabilization failed (%v elapsed)", time.Since(graph.stabilizationStarted).Round(time.Microsecond))
-	} else {
-		TracePrintf(ctx, "stabilization complete (%v elapsed)", time.Since(graph.stabilizationStarted).Round(time.Microsecond))
+	if graph.tracing {
+		if err != nil {
+			TraceErrorf(ctx, "stabilization error: %v", err)
+			TracePrintf(ctx, "stabilization failed (%v elapsed)", time.Since(graph.stabilizationStarted).Round(time.Microsecond))
+		} else {
+			TracePrintf(ctx, "stabilization complete (%v elapsed)", time.Since(graph.stabilizationStarted).Round(time.Microsecond))
+		}
 	}
 	graph.stabilizeEndRunUpdateHandlers(ctx)
 	graph.stabilizationNum++
@@ -711,14 +741,12 @@ func (graph *Graph) stabilizeEndHandleSetDuringStabilization(ctx context.Context
 	defer graph.setDuringStabilizationMu.Unlock()
 
 	if graph.deterministic {
-		keys := make([]Identifier, 0, len(graph.setDuringStabilization))
+		graph.keys = graph.keys[:0]
 		for key := range graph.setDuringStabilization {
-			keys = append(keys, key)
+			graph.keys = append(graph.keys, key)
 		}
-		slices.SortFunc(keys, func(id0, id1 Identifier) int {
-			return strings.Compare(id0.String(), id1.String())
-		})
-		for _, nodeID := range keys {
+		slices.SortFunc(graph.keys, IdentifierCompareFunc)
+		for _, nodeID := range graph.keys {
 			n := graph.setDuringStabilization[nodeID]
 			_ = n.Node().maybeStabilize(ctx)
 			graph.SetStale(n)
@@ -737,7 +765,7 @@ func (graph *Graph) stabilizeEndRunUpdateHandlers(ctx context.Context) {
 	defer graph.handleAfterStabilizationMu.Unlock()
 
 	atomic.StoreInt32(&graph.status, StatusRunningUpdateHandlers)
-	if len(graph.handleAfterStabilization) > 0 {
+	if len(graph.handleAfterStabilization) > 0 && graph.tracing {
 		TracePrintln(ctx, "stabilization calling user update handlers starting")
 		defer func() {
 			TracePrintln(ctx, "stabilization calling user update handlers complete")
@@ -746,14 +774,12 @@ func (graph *Graph) stabilizeEndRunUpdateHandlers(ctx context.Context) {
 
 	if graph.deterministic {
 		// we have to sort these so that update handlers fire in order
-		keys := make([]Identifier, 0, len(graph.handleAfterStabilization))
+		graph.keys = graph.keys[:0]
 		for key := range graph.handleAfterStabilization {
-			keys = append(keys, key)
+			graph.keys = append(graph.keys, key)
 		}
-		slices.SortFunc(keys, func(id0, id1 Identifier) int {
-			return strings.Compare(id0.String(), id1.String())
-		})
-		for _, nodeID := range keys {
+		slices.SortFunc(graph.keys, IdentifierCompareFunc)
+		for _, nodeID := range graph.keys {
 			for _, uh := range graph.handleAfterStabilization[nodeID] {
 				uh(ctx)
 			}

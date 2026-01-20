@@ -31,13 +31,13 @@ func (graph *Graph) Stabilize(ctx context.Context) (err error) {
 		graph.stabilizeEnd(ctx, err)
 	}()
 
-	var immediateRecompute []INode
 	var next INode
+	graph.immediateRecompute = graph.immediateRecompute[:0]
 	for graph.recomputeHeap.numItems > 0 {
 		next, _ = graph.recomputeHeap.removeMinUnsafe()
 		err = graph.recompute(ctx, next, false /*parallel*/)
 		if next.Node().always {
-			immediateRecompute = append(immediateRecompute, next)
+			graph.immediateRecompute = append(graph.immediateRecompute, next)
 		}
 		if err != nil {
 			break
@@ -53,8 +53,8 @@ func (graph *Graph) Stabilize(ctx context.Context) (err error) {
 			}
 		}
 	}
-	if len(immediateRecompute) > 0 {
-		for _, n := range immediateRecompute {
+	if len(graph.immediateRecompute) > 0 {
+		for _, n := range graph.immediateRecompute {
 			graph.recomputeHeap.addIfNotPresent(n)
 		}
 	}

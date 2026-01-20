@@ -213,10 +213,11 @@ func (b *bindLeftChangeIncr[A, B]) Stabilize(ctx context.Context) (err error) {
 		return
 	}
 
+	b.bind.main.parents = b.bind.main.parents[:0]
 	if b.bind.rhs != nil {
-		b.bind.main.parents = []INode{b, b.bind.rhs}
+		b.bind.main.parents = append(b.bind.main.parents, b, b.bind.rhs)
 	} else {
-		b.bind.main.parents = []INode{b}
+		b.bind.main.parents = append(b.bind.main.parents, b)
 	}
 
 	if err = GraphForNode(b).changeParent(b.bind.main, oldRhs, b.bind.rhs); err != nil {

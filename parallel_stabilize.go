@@ -3,7 +3,6 @@ package incr
 import (
 	"context"
 	"fmt"
-	"sync"
 )
 
 // ParallelStabilize stabilizes a graph in parallel.
@@ -40,14 +39,13 @@ func (graph *Graph) parallelStabilize(ctx context.Context) (err error) {
 		return
 	}
 
-	var immediateRecompute []INode
-	var immediateRecomputeMu sync.Mutex
+	graph.immediateRecompute = graph.immediateRecompute[:0]
 	parallelRecomputeNode := func(ctx context.Context, n INode) (err error) {
 		err = graph.recompute(ctx, n, true)
 		if n.Node().always {
-			immediateRecomputeMu.Lock()
-			immediateRecompute = append(immediateRecompute, n)
-			immediateRecomputeMu.Unlock()
+			graph.immediateRecomputeMu.Lock()
+			graph.immediateRecompute = append(graph.immediateRecompute, n)
+			graph.immediateRecomputeMu.Unlock()
 		}
 		return
 	}
@@ -70,9 +68,9 @@ func (graph *Graph) parallelStabilize(ctx context.Context) (err error) {
 			}
 		}
 	}
-	if len(immediateRecompute) > 0 {
+	if len(graph.immediateRecompute) > 0 {
 		graph.recomputeHeap.mu.Lock()
-		for _, n := range immediateRecompute {
+		for _, n := range graph.immediateRecompute {
 			if n.Node().heightInRecomputeHeap == HeightUnset {
 				graph.recomputeHeap.addNodeUnsafe(n)
 			}

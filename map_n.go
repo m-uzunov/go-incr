@@ -47,10 +47,11 @@ var (
 )
 
 type mapNIncr[A, B any] struct {
-	n      *Node
-	inputs []Incr[A]
-	fn     MapNContextFunc[A, B]
-	val    B
+	n           *Node
+	inputs      []Incr[A]
+	fn          MapNContextFunc[A, B]
+	val         B
+	inputValues []A
 }
 
 func (mi *mapNIncr[A, B]) Parents() []INode {
@@ -90,11 +91,11 @@ func (mn *mapNIncr[A, B]) Value() B { return mn.val }
 
 func (mn *mapNIncr[A, B]) Stabilize(ctx context.Context) (err error) {
 	var val B
-	values := make([]A, len(mn.inputs))
+	mn.inputValues = mn.inputValues[:0]
 	for index := range mn.inputs {
-		values[index] = mn.inputs[index].Value()
+		mn.inputValues = append(mn.inputValues, mn.inputs[index].Value())
 	}
-	val, err = mn.fn(ctx, values...)
+	val, err = mn.fn(ctx, mn.inputValues...)
 	if err != nil {
 		return
 	}

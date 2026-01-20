@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/wcharczuk/go-incr/testutil"
@@ -71,6 +72,18 @@ func Test_Identifier_IsZero(t *testing.T) {
 	testutil.Equal(t, true, _zero.IsZero())
 	var test Identifier
 	testutil.Equal(t, true, test.IsZero())
+}
+
+func Test_Identifier_Compare(t *testing.T) {
+	provider := NewSequentialIdentifierProvier(1)
+	id0 := provider.NewIdentifier()
+	id1 := provider.NewIdentifier()
+	testutil.Equal(t, 0, IdentifierCompareFunc(id0, id0))
+	testutil.Equal(t, -1, IdentifierCompareFunc(id0, id1))
+	testutil.Equal(t, 1, IdentifierCompareFunc(id1, id0))
+	testutil.Equal(t, 0, strings.Compare(id0.String(), id0.String()))
+	testutil.Equal(t, -1, strings.Compare(id0.String(), id1.String()))
+	testutil.Equal(t, 1, strings.Compare(id1.String(), id0.String()))
 }
 
 func Test_ParseIdentifier(t *testing.T) {

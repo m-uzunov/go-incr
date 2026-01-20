@@ -1521,7 +1521,7 @@ func Test_Stabilize_Always_Cutoff_error(t *testing.T) {
 }
 
 func Test_Stabilize_printsErrors(t *testing.T) {
-	g := New()
+	g := New(OptGraphTracing(true))
 
 	outBuf := new(bytes.Buffer)
 	errBuf := new(bytes.Buffer)
