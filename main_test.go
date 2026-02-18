@@ -122,7 +122,8 @@ func (mn *mockBareNode) Value() any {
 func newHeightIncr(scope Scope, height int) *heightIncr {
 	return WithinScope(scope, &heightIncr{
 		n: &Node{
-			height: height,
+			height:                height,
+			heightInRecomputeHeap: HeightUnset,
 		},
 	})
 }
@@ -140,13 +141,13 @@ func (hi heightIncr) Node() *Node {
 	return hi.n
 }
 
-func newList(items ...INode) *recomputeHeapList {
-	l := new(recomputeHeapList)
+func newQueue(items ...INode) *queue[INode] {
+	q := new(queue[INode])
 	for _, i := range items {
 		i.Node().heightInRecomputeHeap = i.Node().height
-		l.push(i)
+		q.push(i)
 	}
-	return l
+	return q
 }
 
 func createDynamicMaps(scope Scope, label string) Incr[string] {

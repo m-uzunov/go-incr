@@ -93,22 +93,7 @@ func Test_Graph_recompute_recomputesObservers(t *testing.T) {
 	testutil.Equal(t, false, g.recomputeHeap.has(n))
 	testutil.Equal(t, false, g.recomputeHeap.has(o))
 
-	err := g.recompute(testContext(), n, false)
-	testutil.Nil(t, err)
-	testutil.Equal(t, 0, g.recomputeHeap.len())
-	testutil.Equal(t, false, g.recomputeHeap.has(o))
-}
-
-func Test_Graph_recompute_recomputesObservers_parallel(t *testing.T) {
-	g := New()
-	n := newMockBareNode(g)
-	o := MustObserve(g, n)
-	g.recomputeHeap.clear()
-
-	testutil.Equal(t, false, g.recomputeHeap.has(n))
-	testutil.Equal(t, false, g.recomputeHeap.has(o))
-
-	err := g.recompute(testContext(), n, true)
+	err := g.recompute(testContext(), n)
 	testutil.Nil(t, err)
 	testutil.Equal(t, 0, g.recomputeHeap.len())
 	testutil.Equal(t, false, g.recomputeHeap.has(o))
@@ -122,10 +107,10 @@ func Test_Graph_removeNodeFromGraph(t *testing.T) {
 
 	g.nodes[mn00.n.id] = mn00
 
-	g.handleAfterStabilization[mn00.n.id] = []func(context.Context){
+	g.handleAfterStabilization = append(g.handleAfterStabilization, []func(context.Context){
 		func(_ context.Context) {},
 		func(_ context.Context) {},
-	}
+	})
 	g.setDuringStabilization[mn00.n.id] = mn00
 	g.recomputeHeap.add(mn00)
 
@@ -144,7 +129,6 @@ func Test_Graph_removeNodeFromGraph(t *testing.T) {
 	testutil.Equal(t, HeightUnset, mn00.n.heightInRecomputeHeap)
 	testutil.Equal(t, HeightUnset, mn00.n.heightInAdjustHeightsHeap)
 
-	testutil.NotHasKey(t, mn00.n.id, g.handleAfterStabilization)
 	testutil.NotHasKey(t, mn00.n.id, g.setDuringStabilization)
 }
 

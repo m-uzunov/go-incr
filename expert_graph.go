@@ -159,17 +159,10 @@ func (eg *expertGraph) RecomputeHeapLen() int {
 }
 
 func (eg *expertGraph) RecomputeHeapIDs() []Identifier {
-	eg.graph.recomputeHeap.mu.Lock()
-	defer eg.graph.recomputeHeap.mu.Unlock()
-
 	output := make([]Identifier, 0, eg.graph.recomputeHeap.numItems)
-	for _, height := range eg.graph.recomputeHeap.heights {
-		if height != nil {
-			cursor := height.head
-			for cursor != nil {
-				output = append(output, cursor.Node().id)
-				cursor = cursor.Node().nextInRecomputeHeap
-			}
+	for i := range eg.graph.recomputeHeap.heights {
+		for _, node := range eg.graph.recomputeHeap.heights[i].values() {
+			output = append(output, node.Node().id)
 		}
 	}
 	return output
@@ -231,8 +224,8 @@ func (eg *expertGraph) StabilizeStart(ctx context.Context) context.Context {
 func (eg *expertGraph) StabilizeEnd(ctx context.Context, err error) {
 	eg.graph.stabilizeEnd(ctx, err)
 }
-func (eg *expertGraph) Recompute(ctx context.Context, n INode, parallel bool) error {
-	return eg.graph.recompute(ctx, n, parallel)
+func (eg *expertGraph) Recompute(ctx context.Context, n INode, _ bool) error {
+	return eg.graph.recompute(ctx, n)
 }
 func (eg *expertGraph) RecomputeHeapListIterator() RecomputeHeapListIterator {
 	return new(recomputeHeapListIter)

@@ -52,7 +52,7 @@ func New(opts ...GraphOption) *Graph {
 		recomputeHeap:             newRecomputeHeap(options.MaxHeight),
 		adjustHeightsHeap:         newAdjustHeightsHeap(options.MaxHeight),
 		setDuringStabilization:    make(map[Identifier]INode),
-		handleAfterStabilization:  make(map[Identifier][]func(context.Context)),
+		handleAfterStabilization:  make([][]func(context.Context), 0, 64),
 		propagateInvalidityQueue:  new(queue[INode]),
 	}
 }
@@ -197,8 +197,7 @@ type Graph struct {
 	// label is a descriptive label for the graph
 	label string
 
-	// parallelism is the degree of parallelism used when processing nodes
-	// with the [parallelBatch] iterator.
+	// parallelism is a legacy field for parallel stabilization.
 	parallelism int
 
 	// clearRecomputeHeapOnError controls if we should clear the recomputeHeap on error.
@@ -212,19 +211,13 @@ type Graph struct {
 	// and extracting tracers from it for writing stabilization logs.
 	tracing bool
 
-	// nodesMu interlocks access to nodes
-	nodesMu sync.Mutex
 	// observed are the nodes that the graph currently observes
 	// organized by node id.
 	nodes map[Identifier]INode
 
-	// observersMu interlocks access to observers
-	observersMu sync.Mutex
 	// observers hold references to observers organized by node id.
 	observers map[Identifier]IObserver
 
-	// sentinelsMu interlocks access to sentinels
-	sentinelsMu sync.Mutex
 	// sentinels hold references to sentinels organized by node id.
 	sentinels map[Identifier]ISentinel
 
@@ -241,11 +234,9 @@ type Graph struct {
 	// set during stabilization
 	setDuringStabilization map[Identifier]INode
 
-	// handleAfterStabilizationMu coordinates access to handleAfterStabilization
-	handleAfterStabilizationMu sync.Mutex
 	// handleAfterStabilization is a list of update
-	// handlers that need to run after stabilization is done.
-	handleAfterStabilization map[Identifier][]func(context.Context)
+	// handler groups that need to run after stabilization is done.
+	handleAfterStabilization [][]func(context.Context)
 
 	// stabilizationNum is the version
 	// of the graph in respect to when
@@ -277,9 +268,6 @@ type Graph struct {
 
 	// reusable identifier slice for sorting
 	keys []Identifier
-
-	// immediateRecomputeMu interlocks access to immediateRecompute.
-	immediateRecomputeMu sync.Mutex
 
 	// immediateRecompute is a reusable list of nodes that need to be recomputed immediately.
 	immediateRecompute []INode
@@ -325,25 +313,19 @@ func (graph *Graph) IsStabilizing() bool {
 
 // IsObserving returns if a graph is observing a given node.
 func (graph *Graph) Has(gn INode) (ok bool) {
-	graph.nodesMu.Lock()
 	_, ok = graph.nodes[gn.Node().id]
-	graph.nodesMu.Unlock()
 	return
 }
 
 // HasObserver returns if a graph has a given observer.
 func (graph *Graph) HasObserver(on IObserver) (ok bool) {
-	graph.observersMu.Lock()
 	_, ok = graph.observers[on.Node().id]
-	graph.observersMu.Unlock()
 	return
 }
 
 // HasSentinel returns if a graph has a given sentinel.
 func (graph *Graph) HasSentinel(sn ISentinel) (ok bool) {
-	graph.sentinelsMu.Lock()
 	_, ok = graph.sentinels[sn.Node().id]
-	graph.sentinelsMu.Unlock()
 	return
 }
 
@@ -554,9 +536,6 @@ func (graph *Graph) becameNecessary(node INode) error {
 }
 
 func (graph *Graph) addNode(n INode) {
-	graph.nodesMu.Lock()
-	defer graph.nodesMu.Unlock()
-
 	gnn := n.Node()
 	_, graphAlreadyHasNode := graph.nodes[gnn.id]
 	if graphAlreadyHasNode {
@@ -568,9 +547,6 @@ func (graph *Graph) addNode(n INode) {
 }
 
 func (graph *Graph) addObserver(on IObserver) {
-	graph.observersMu.Lock()
-	defer graph.observersMu.Unlock()
-
 	onn := on.Node()
 	_, graphAlreadyHasObserver := graph.observers[onn.id]
 	if graphAlreadyHasObserver {
@@ -582,9 +558,6 @@ func (graph *Graph) addObserver(on IObserver) {
 }
 
 func (graph *Graph) addSentinel(sn ISentinel) {
-	graph.sentinelsMu.Lock()
-	defer graph.sentinelsMu.Unlock()
-
 	snn := sn.Node()
 	_, graphAlreadyHasSentinel := graph.sentinels[snn.id]
 	if graphAlreadyHasSentinel {
@@ -596,23 +569,17 @@ func (graph *Graph) addSentinel(sn ISentinel) {
 }
 
 func (graph *Graph) removeObserver(on IObserver) {
-	graph.observersMu.Lock()
 	delete(graph.observers, on.Node().id)
-	graph.observersMu.Unlock()
 	graph.zeroNode(on)
 }
 
 func (graph *Graph) removeSentinel(sn ISentinel) {
-	graph.sentinelsMu.Lock()
 	delete(graph.sentinels, sn.Node().id)
-	graph.sentinelsMu.Unlock()
 	graph.zeroNode(sn)
 }
 
 func (graph *Graph) removeNode(gn INode) {
-	graph.nodesMu.Lock()
 	delete(graph.nodes, gn.Node().id)
-	graph.nodesMu.Unlock()
 	graph.zeroNode(gn)
 }
 
@@ -624,10 +591,6 @@ func (graph *Graph) zeroNode(n INode) {
 	graph.numNodes--
 
 	nn := n.Node()
-
-	graph.handleAfterStabilizationMu.Lock()
-	delete(graph.handleAfterStabilization, nn.ID())
-	graph.handleAfterStabilizationMu.Unlock()
 
 	graph.setDuringStabilizationMu.Lock()
 	delete(graph.setDuringStabilization, nn.ID())
@@ -658,9 +621,7 @@ func (graph *Graph) observeNode(o IObserver, input INode) error {
 			return err
 		}
 	}
-	graph.handleAfterStabilizationMu.Lock()
-	graph.handleAfterStabilization[o.Node().id] = o.Node().onUpdateHandlers
-	graph.handleAfterStabilizationMu.Unlock()
+	graph.handleAfterStabilization = append(graph.handleAfterStabilization, o.Node().onUpdateHandlers)
 	return nil
 }
 
@@ -759,9 +720,6 @@ func (graph *Graph) stabilizeEndHandleSetDuringStabilization(ctx context.Context
 }
 
 func (graph *Graph) stabilizeEndRunUpdateHandlers(ctx context.Context) {
-	graph.handleAfterStabilizationMu.Lock()
-	defer graph.handleAfterStabilizationMu.Unlock()
-
 	atomic.StoreInt32(&graph.status, StatusRunningUpdateHandlers)
 	if len(graph.handleAfterStabilization) > 0 && graph.tracing {
 		TracePrintln(ctx, "stabilization calling user update handlers starting")
@@ -769,32 +727,17 @@ func (graph *Graph) stabilizeEndRunUpdateHandlers(ctx context.Context) {
 			TracePrintln(ctx, "stabilization calling user update handlers complete")
 		}()
 	}
-
-	if graph.deterministic {
-		// we have to sort these so that update handlers fire in order
-		graph.keys = graph.keys[:0]
-		for key := range graph.handleAfterStabilization {
-			graph.keys = append(graph.keys, key)
-		}
-		slices.SortFunc(graph.keys, IdentifierCompareFunc)
-		for _, nodeID := range graph.keys {
-			for _, uh := range graph.handleAfterStabilization[nodeID] {
-				uh(ctx)
-			}
-		}
-	} else {
-		for _, updateGroup := range graph.handleAfterStabilization {
-			for _, uh := range updateGroup {
-				uh(ctx)
-			}
+	for _, handlers := range graph.handleAfterStabilization {
+		for _, uh := range handlers {
+			uh(ctx)
 		}
 	}
-	clear(graph.handleAfterStabilization)
+	graph.handleAfterStabilization = graph.handleAfterStabilization[:0]
 }
 
 // recompute starts the recompute cycle for the node
 // setting the recomputedAt field and possibly changing the value.
-func (graph *Graph) recompute(ctx context.Context, n INode, parallel bool) (err error) {
+func (graph *Graph) recompute(ctx context.Context, n INode) (err error) {
 	graph.numNodesRecomputed++
 
 	nn := n.Node()
@@ -825,30 +768,12 @@ func (graph *Graph) recompute(ctx context.Context, n INode, parallel bool) (err 
 
 	nn.changedAt = graph.stabilizationNum
 	if len(nn.onUpdateHandlers) > 0 {
-		graph.handleAfterStabilizationMu.Lock()
-		graph.handleAfterStabilization[nn.id] = nn.onUpdateHandlers
-		graph.handleAfterStabilizationMu.Unlock()
+		graph.handleAfterStabilization = append(graph.handleAfterStabilization, nn.onUpdateHandlers)
 	}
 
-	if parallel {
-		graph.recomputeHeap.mu.Lock()
-		for _, c := range nn.children {
-			isNecessary := c.Node().isNecessary()
-			isStale := c.Node().isStale()
-			isNotInRecomputeHeap := c.Node().heightInRecomputeHeap == HeightUnset
-			if isNecessary && isStale && isNotInRecomputeHeap {
-				graph.recomputeHeap.addNodeUnsafe(c)
-			}
-		}
-		graph.recomputeHeap.mu.Unlock()
-	} else {
-		for _, c := range nn.children {
-			isNecessary := c.Node().isNecessary()
-			isStale := c.Node().isStale()
-			isNotInRecomputeHeap := c.Node().heightInRecomputeHeap == HeightUnset
-			if isNecessary && isStale && isNotInRecomputeHeap {
-				graph.recomputeHeap.addNodeUnsafe(c)
-			}
+	for _, c := range nn.children {
+		if c.Node().isNecessary() && c.Node().isStale() && c.Node().heightInRecomputeHeap == HeightUnset {
+			graph.recomputeHeap.addNodeUnsafe(c)
 		}
 	}
 
@@ -856,9 +781,7 @@ func (graph *Graph) recompute(ctx context.Context, n INode, parallel bool) (err 
 	// children of this node but will not have any children themselves.
 	for _, o := range nn.observers {
 		if len(o.Node().onUpdateHandlers) > 0 {
-			graph.handleAfterStabilizationMu.Lock()
-			graph.handleAfterStabilization[o.Node().id] = o.Node().onUpdateHandlers
-			graph.handleAfterStabilizationMu.Unlock()
+			graph.handleAfterStabilization = append(graph.handleAfterStabilization, o.Node().onUpdateHandlers)
 		}
 	}
 	return

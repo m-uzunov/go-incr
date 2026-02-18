@@ -39,7 +39,7 @@ func (graph *Graph) Stabilize(ctx context.Context) (err error) {
 	// modify this if ensureNotStabilizing passes
 	for graph.recomputeHeap.numItems > 0 {
 		next, _ = graph.recomputeHeap.removeMinUnsafe()
-		err = graph.recompute(ctx, next, false /*parallel*/)
+		err = graph.recompute(ctx, next)
 		if next.Node().always {
 			graph.immediateRecompute = append(graph.immediateRecompute, next)
 		}
@@ -63,4 +63,11 @@ func (graph *Graph) Stabilize(ctx context.Context) (err error) {
 		}
 	}
 	return
+}
+
+// ParallelStabilize delegates to [Graph.Stabilize].
+//
+// Deprecated: Use [Graph.Stabilize] directly.
+func (graph *Graph) ParallelStabilize(ctx context.Context) error {
+	return graph.Stabilize(ctx)
 }

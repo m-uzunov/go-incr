@@ -36,7 +36,7 @@ func Test_recomputeHeap_add(t *testing.T) {
 		testutil.Equal(t, 1, rh.heights[5].len())
 		testutil.Equal(t, 1, rh.heights[6].len())
 		testutil.Equal(t, true, rh.has(n50))
-		testutil.Equal(t, true, rh.has(n50))
+		testutil.Equal(t, true, rh.has(n60))
 		testutil.Equal(t, false, rh.has(n70))
 		testutil.Equal(t, 5, rh.minHeight)
 		testutil.Equal(t, 6, rh.maxHeight)
@@ -118,8 +118,7 @@ func Test_recomputeHeap_setIterToMinHeight(t *testing.T) {
 
 	for _, n := range iterValues {
 		testutil.NotNil(t, n)
-		testutil.Nil(t, n.Node().nextInRecomputeHeap)
-		testutil.Nil(t, n.Node().previousInRecomputeHeap)
+		testutil.Equal(t, HeightUnset, n.Node().heightInRecomputeHeap)
 	}
 
 	testutil.Equal(t, 1, rh.minHeight)
@@ -136,8 +135,7 @@ func Test_recomputeHeap_setIterToMinHeight(t *testing.T) {
 
 	for _, n := range iterValues {
 		testutil.NotNil(t, n)
-		testutil.Nil(t, n.Node().nextInRecomputeHeap)
-		testutil.Nil(t, n.Node().previousInRecomputeHeap)
+		testutil.Equal(t, HeightUnset, n.Node().heightInRecomputeHeap)
 	}
 
 	rh.setIterToMinHeight(&iter)
@@ -151,8 +149,7 @@ func Test_recomputeHeap_setIterToMinHeight(t *testing.T) {
 
 	for _, n := range iterValues {
 		testutil.NotNil(t, n)
-		testutil.Nil(t, n.Node().nextInRecomputeHeap)
-		testutil.Nil(t, n.Node().previousInRecomputeHeap)
+		testutil.Equal(t, HeightUnset, n.Node().heightInRecomputeHeap)
 	}
 
 	rh.add(n50)
@@ -177,8 +174,7 @@ func Test_recomputeHeap_setIterToMinHeight(t *testing.T) {
 
 	for _, n := range iterValues {
 		testutil.NotNil(t, n)
-		testutil.Nil(t, n.Node().nextInRecomputeHeap)
-		testutil.Nil(t, n.Node().previousInRecomputeHeap)
+		testutil.Equal(t, HeightUnset, n.Node().heightInRecomputeHeap)
 	}
 }
 
@@ -215,14 +211,6 @@ func Test_recomputeHeap_remove(t *testing.T) {
 	testutil.Equal(t, true, rh.has(n11))
 	testutil.Equal(t, true, rh.has(n20))
 	testutil.Equal(t, false, rh.has(n21))
-
-	for _, h := range rh.heights {
-		if h == nil {
-			continue
-		}
-		testutil.Equal(t, false, h.has(n21.n.id))
-	}
-
 	testutil.Equal(t, true, rh.has(n22))
 	testutil.Equal(t, true, rh.has(n30))
 
@@ -237,18 +225,8 @@ func Test_recomputeHeap_remove(t *testing.T) {
 	testutil.Equal(t, 2, rh.minHeight)
 	testutil.Equal(t, 3, rh.maxHeight)
 
-	for _, h := range rh.heights {
-		if h == nil {
-			continue
-		}
-		testutil.Equal(t, false, h.has(n10.n.id))
-	}
-	for _, h := range rh.heights {
-		if h == nil {
-			continue
-		}
-		testutil.Equal(t, false, h.has(n11.n.id))
-	}
+	testutil.Equal(t, false, rh.has(n10))
+	testutil.Equal(t, false, rh.has(n11))
 }
 
 func Test_recomputeHeap_nextMinHeightUnsafe_noItems(t *testing.T) {
@@ -360,14 +338,15 @@ func Test_recomputeHeap_sanityCheck_badItemHeight(t *testing.T) {
 	n_3_01 := newMockBareNodeWithHeight(g, 3)
 	n_3_02 := newMockBareNodeWithHeight(g, 3)
 
-	height2 := newList(n_2_00, n_2_01)
-
-	rh.heights = []*recomputeHeapList{
-		nil,
-		newList(n_1_00),
-		height2,
-		newList(n_3_00, n_3_01, n_3_02),
+	rh.heights = []queue[INode]{
+		{},
+		*newQueue(n_1_00),
+		*newQueue(n_2_00, n_2_01),
+		*newQueue(n_3_00, n_3_01, n_3_02),
 	}
+	rh.numItems = 6
+	rh.minHeight = 1
+	rh.maxHeight = 3
 
 	n_2_00.Node().heightInRecomputeHeap = 1
 	err := rh.sanityCheck()
@@ -385,14 +364,15 @@ func Test_recomputeHeap_sanityCheck_badHeightInRecomputeHeap(t *testing.T) {
 	n_3_01 := newMockBareNodeWithHeight(g, 3)
 	n_3_02 := newMockBareNodeWithHeight(g, 3)
 
-	height2 := newList(n_2_00, n_2_01)
-
-	rh.heights = []*recomputeHeapList{
-		nil,
-		newList(n_1_00),
-		height2,
-		newList(n_3_00, n_3_01, n_3_02),
+	rh.heights = []queue[INode]{
+		{},
+		*newQueue(n_1_00),
+		*newQueue(n_2_00, n_2_01),
+		*newQueue(n_3_00, n_3_01, n_3_02),
 	}
+	rh.numItems = 6
+	rh.minHeight = 1
+	rh.maxHeight = 3
 
 	n_2_00.Node().height = 1
 	err := rh.sanityCheck()

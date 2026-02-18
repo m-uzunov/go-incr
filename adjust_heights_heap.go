@@ -2,7 +2,6 @@ package incr
 
 import (
 	"fmt"
-	"sync"
 )
 
 func newAdjustHeightsHeap(maxHeightAllowed int) *adjustHeightsHeap {
@@ -21,7 +20,6 @@ func newAdjustHeightsHeap(maxHeightAllowed int) *adjustHeightsHeap {
 // height above that, recursing through the children adding more as we
 // see them, preserving the invariant.
 type adjustHeightsHeap struct {
-	mu               sync.Mutex
 	nodesByHeight    []*queue[INode]
 	numNodes         int
 	maxHeightSeen    int
@@ -37,17 +35,10 @@ func (ah *adjustHeightsHeap) maxHeightAllowed() int {
 }
 
 func (ah *adjustHeightsHeap) setHeight(node INode, height int) error {
-	ah.mu.Lock()
-	defer ah.mu.Unlock()
 	return ah.setHeightUnsafe(node, height)
 }
 
 func (ah *adjustHeightsHeap) adjustHeights(rh *recomputeHeap, originalChild, originalParent INode) error {
-	ah.mu.Lock()
-	rh.mu.Lock()
-	defer ah.mu.Unlock()
-	defer rh.mu.Unlock()
-
 	ah.heightLowerBound = originalChild.Node().height
 	if err := ah.ensureHeightRequirementUnsafe(originalChild, originalParent, originalChild, originalParent); err != nil {
 		return err
@@ -55,7 +46,7 @@ func (ah *adjustHeightsHeap) adjustHeights(rh *recomputeHeap, originalChild, ori
 	for ah.numNodes > 0 {
 		parent, _ := ah.removeMinUnsafe()
 		if parent.Node().heightInRecomputeHeap != HeightUnset {
-			rh.fixUnsafe(parent)
+			rh.fix(parent)
 		}
 		for _, child := range parent.Node().children {
 			if err := ah.ensureHeightRequirementUnsafe(originalChild, originalParent, child, parent); err != nil {
